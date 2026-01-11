@@ -54,6 +54,13 @@ module IptablesToSmt {
 
     // Sequences are 0-indexed. We take the last argument as the input payload.
     var payload := args[|args| - 1];
+    
+    // Runtime check to respect the precondition we added
+    if exists k :: 0 <= k < |payload| && payload[k] == '\r' {
+      print "Error: Input contains carriage returns (\\r). Please normalize to \\n only.\n";
+      return;
+    }
+    
     var smt := ConvertIptablesToSmt(payload);
     print smt;
   }
@@ -73,6 +80,7 @@ module IptablesToSmt {
   // Splits the input into rules, parses them, and builds the SMT document.
   // 'returns (smt: string)' names the return value 'smt', which is assigned before returning.
   method ConvertIptablesToSmt(input: string) returns (smt: string)
+    requires forall k :: 0 <= k < |input| ==> input[k] != '\r'
     ensures |smt| > 0
   {
     var lines := SplitLines(input);
@@ -122,89 +130,93 @@ module IptablesToSmt {
 
   // Logic to iterate over tokens and extract rule fields.
   // Returns 'ok' as false if parsing fails (e.g. unknown flag).
+  // Helper to find a flag's value in the token sequence.
+  function FindMatch(tokens: seq<string>, flag: string): FieldMatch
+    requires forall t :: t in tokens ==> |t| > 0
+    ensures FindMatch(tokens, flag).MatchExact? ==> |FindMatch(tokens, flag).value| > 0
+  {
+    if |tokens| < 2 then MatchAny
+    else if tokens[0] == flag then MatchExact(tokens[1])
+    else FindMatch(tokens[1..], flag)
+  }
+
+
+  // Helper to check if the token sequence contains only valid flags.
+  // In Dafny 4, 'function' is compiled by default.
+  function ValidTokens(tokens: seq<string>): bool
+  {
+    if |tokens| < 1 then true
+    else 
+      var t := tokens[0];
+      if t == "-s" || t == "-d" || t == "-p" || t == "--sport" || t == "--dport" || t == "-j" then
+         if |tokens| >= 2 then ValidTokens(tokens[2..]) else false // Flag must have arg
+      else if t == "-A" then 
+         if |tokens| >= 2 then ValidTokens(tokens[2..]) else false   
+      else
+         false // Unknown token/flag
+  }
+  
+  // Note: The original ParseRuleTokens logic was slightly more permissive/different about where flags appear.
+  // But strictly, flags should be essentially recursive.
+  // However, ParseRuleTokens skips the first 2 tokens (-A CHAIN).
+  // So we will just look for flags in tokens[2..].
+
   method ParseRuleTokens(tokens: seq<string>, lineNumber: int, rawLine: string) returns (rule: Rule, ok: bool)
     requires lineNumber > 0
     requires forall t :: t in tokens ==> |t| > 0
-    ensures |tokens| >= 2 && ok ==> rule.chain == tokens[1]
+    ensures |tokens| >= 3 && ok ==> rule.chain == tokens[1]
     ensures ok ==> rule.original == rawLine
     ensures ok ==> rule.lineNumber == lineNumber
+    // Strong Specs:
+    ensures ok ==> |tokens| >= 3 
+    ensures ok ==> (rule.source == FindMatch(tokens[2..], "-s"))
+    ensures ok ==> (rule.destination == FindMatch(tokens[2..], "-d"))
+    ensures ok ==> (rule.protocol == FindMatch(tokens[2..], "-p"))
+    ensures ok ==> (rule.srcPort == FindMatch(tokens[2..], "--sport"))
+    ensures ok ==> (rule.dstPort == FindMatch(tokens[2..], "--dport"))
+    // Guarded implication:
+    ensures (|tokens| >= 3 && ValidTokens(tokens[2..]) && FindMatch(tokens[2..], "-j").MatchExact?) ==> ok
   {
     // Check for minimum length: -A <CHAIN> ...
     if |tokens| < 3 {
-      // Return a dummy rule and failure status
       rule := Rule("", MatchAny, MatchAny, MatchAny, MatchAny, MatchAny, TargetReturn, lineNumber, rawLine);
       ok := false;
       return;
     }
 
     var chain := tokens[1];
-    var src: FieldMatch := MatchAny;
-    var dst: FieldMatch := MatchAny;
-    var proto: FieldMatch := MatchAny;
-    var srcPort: FieldMatch := MatchAny;
-    var dstPort: FieldMatch := MatchAny;
-    var target := TargetReturn;
-    var targetSet := false;
+    var rest := tokens[2..];
 
-    var i := 2;
-    // Main parsing loop
-    while i < |tokens|
-      decreases |tokens| - i
-    {
-      var flag := tokens[i];
-
-      // Check for source flag "-s"
-      if flag == "-s" && i + 1 < |tokens| {
-        src := MatchExact(tokens[i + 1]);
-        i := i + 2;
-        continue;
-      }
-
-      // Check for destination flag "-d"
-      if flag == "-d" && i + 1 < |tokens| {
-        dst := MatchExact(tokens[i + 1]);
-        i := i + 2;
-        continue;
-      }
-
-      // Check for protocol flag "-p"
-      if flag == "-p" && i + 1 < |tokens| {
-        proto := MatchExact(tokens[i + 1]);
-        i := i + 2;
-        continue;
-      }
-
-      // Check for target flag "-j" (Jump)
-      if flag == "-j" && i + 1 < |tokens| {
-        target := ParseTarget(tokens[i + 1]);
-        targetSet := true;
-        i := i + 2;
-        continue;
-      }
-
-      // Check for source port "--sport"
-      if flag == "--sport" && i + 1 < |tokens| {
-        srcPort := MatchExact(tokens[i + 1]);
-        i := i + 2;
-        continue;
-      }
-
-      // Check for destination port "--dport"
-      if flag == "--dport" && i + 1 < |tokens| {
-        dstPort := MatchExact(tokens[i + 1]);
-        i := i + 2;
-        continue;
-      }
-
-      // Strict parsing: if we see a flag we don't recognize, we must fail.
-      // Ignoring it effectively means "match any", which effectively widens the security policy.
-      rule := Rule("", MatchAny, MatchAny, MatchAny, MatchAny, MatchAny, TargetReturn, lineNumber, rawLine);
-      ok := false;
-      return;
+    // Use the functional helpers to get values
+    var src := FindMatch(rest, "-s");
+    var dst := FindMatch(rest, "-d");
+    var proto := FindMatch(rest, "-p");
+    var srcPort := FindMatch(rest, "--sport");
+    var dstPort := FindMatch(rest, "--dport");
+    
+    // For Target, we need to find "-j" and parse its value
+    var targetMatch := FindMatch(rest, "-j");
+    var target: Target;
+    var targetOk := false;
+    
+    if targetMatch.MatchExact? {
+       target := ParseTarget(targetMatch.value);
+       targetOk := true;
+    } else {
+       target := TargetReturn;
+       // targetOk remains false
     }
 
-    rule := Rule(chain, src, dst, proto, srcPort, dstPort, target, lineNumber, rawLine);
-    ok := targetSet;
+    // Strictness check: explicitly use the verified predicate
+    var validFlags := ValidTokens(rest);
+
+    if validFlags && targetOk {
+       rule := Rule(chain, src, dst, proto, srcPort, dstPort, target, lineNumber, rawLine);
+       ok := true;
+    } else {
+       rule := Rule(chain, src, dst, proto, srcPort, dstPort, target, lineNumber, rawLine);
+       ok := false;
+    }
   }
 
   method BuildSmtDocument(rules: seq<Rule>) returns (doc: string)
@@ -409,7 +421,11 @@ module IptablesToSmt {
 
   method ParseTarget(raw: string) returns (target: Target)
     requires |raw| > 0
-    ensures MatchesTarget(target, raw)
+    ensures EqualsIgnoreCase(raw, "ACCEPT") ==> target == TargetAccept
+    ensures EqualsIgnoreCase(raw, "DROP") ==> target == TargetDrop
+    ensures EqualsIgnoreCase(raw, "REJECT") ==> target == TargetReject
+    ensures EqualsIgnoreCase(raw, "RETURN") ==> target == TargetReturn
+    ensures !EqualsIgnoreCase(raw, "ACCEPT") && !EqualsIgnoreCase(raw, "DROP") && !EqualsIgnoreCase(raw, "REJECT") && !EqualsIgnoreCase(raw, "RETURN") ==> target == TargetJump(raw)
   {
     var isAccept := StringsEqualIgnoreCase(raw, "ACCEPT");
     if isAccept {
@@ -425,12 +441,24 @@ module IptablesToSmt {
 
     var isReject := StringsEqualIgnoreCase(raw, "REJECT");
     if isReject {
+      // Prove it is NOT "RETURN" (needs 'J' vs 'T' check)
+      if |raw| >= 3 {
+         assert ToUp(raw[2]) == 'J';
+         assert ToUp("RETURN"[2]) == 'T';
+         assert !EqualsIgnoreCase(raw, "RETURN");
+      }
       target := TargetReject;
       return;
     }
 
     var isReturn := StringsEqualIgnoreCase(raw, "RETURN");
     if isReturn {
+      // Prove it is NOT "REJECT"
+       if |raw| >= 3 {
+         assert ToUp(raw[2]) == 'T';
+         assert ToUp("REJECT"[2]) == 'J';
+         assert !EqualsIgnoreCase(raw, "REJECT");
+      }
       target := TargetReturn;
       return;
     }
@@ -479,61 +507,114 @@ module IptablesToSmt {
     }
   }
 
+  // ----------- Strong Specification Helpers -----------
+
+  function Join(parts: seq<string>, delim: string): string
+  {
+    if |parts| == 0 then ""
+    else if |parts| == 1 then parts[0]
+    else parts[0] + delim + Join(parts[1..], delim)
+  }
+
+
   // ----------- Low-Level String Parsing Helpers -----------
 
   // Splits string into lines. Proving string manipulation correct is complex in Dafny!
   // We need invariants to guide the prover.
+  lemma JoinDistributes(parts: seq<string>, delim: string, suffix: string)
+    ensures |parts| > 0 ==> Join(parts + [suffix], delim) == Join(parts, delim) + delim + suffix
+    ensures |parts| == 0 ==> Join(parts + [suffix], delim) == suffix
+  {
+    if |parts| == 0 {
+       // Base case 0: parts is empty. Join([suffix]) definition leads to "suffix". Correct.
+    } else {
+        if |parts| == 1 {
+           // Base case 1: parts is [p0].
+           // Join([p0] + [suffix]) == Join([p0, suffix]).
+           // Definition of Join([p0, suffix]) is p0 + delim + Join([suffix]) == p0 + delim + suffix.
+           // Join([p0]) + delim + suffix == p0 + delim + suffix.
+           // They are equal.
+           assert parts + [suffix] == [parts[0], suffix];
+        } else {
+           // Recursive case: |parts| > 1
+           // Key insight: parts + [suffix] starts with parts[0], and the rest is parts[1..] + [suffix]
+           var p0 := parts[0];
+           var rest := parts[1..];
+           
+           assert parts == [p0] + rest;
+           assert (parts + [suffix]) == [p0] + (rest + [suffix]);
+           
+           // Expand LHS
+           // Join(parts + [suffix]) == Join([p0] + (rest + [suffix]))
+           //                        == p0 + delim + Join(rest + [suffix])
+           
+           // Recurse
+           JoinDistributes(rest, delim, suffix);
+           
+           // Now we know: Join(rest + [suffix]) == Join(rest) + delim + suffix
+           // So LHS == p0 + delim + (Join(rest) + delim + suffix)
+           
+           // Expand RHS
+           // Join(parts) + delim + suffix == (p0 + delim + Join(rest)) + delim + suffix
+           
+           // LHS == RHS by associativity of string concatenation
+        }
+    }
+  }
+
+  // Splits string into lines. 
+  // Simplified to only handle '\n' to prove "Join(lines, '\n') == text"
   method SplitLines(text: string) returns (lines: seq<string>)
-    ensures forall l :: l in lines ==> |l| <= |text|
+    requires forall k :: 0 <= k < |text| ==> text[k] != '\r'
+    ensures Join(lines, "\n") == text
   {
     if |text| == 0 {
-      lines := [];
+      lines := [""]; 
       return;
     }
 
     var segments: seq<string> := [];
     var start := 0;
     var i := 0;
-    // Loop Invariant:
-    // 'invariant' is a property that must be true before and after every loop iteration.
-    // It is CRITICAL for Dafny to prove properties about loops.
+
     while i < |text|
       decreases |text| - i
-      invariant 0 <= start
-      invariant start <= i
-      invariant i <= |text|
-      invariant forall l :: l in segments ==> |l| <= |text|
+      invariant 0 <= start <= i <= |text|
+      invariant (if |segments| == 0 then "" else Join(segments, "\n") + "\n") + text[start..i] == text[0..i]
     {
       var ch := text[i];
       if ch == '\n' {
-        // 'assert' checks a condition at that point in the code.
-        // It helps debugging why verification fails.
-        assert 0 <= start && start <= i && i <= |text|;
         var part := text[start .. i];
-        assert |part| <= |text|;
+        
+        // Assert current state before update
+        assert (if |segments| == 0 then "" else Join(segments, "\n") + "\n") + part == text[0..i];
+
+        // Call Lemma to prove: Join(segments + [part]) == ...
+        JoinDistributes(segments, "\n", part);
+
+        // We need to show:
+        // (if |segments + [part]| == 0 then ... else Join(segments + [part], "\n") + "\n") + text[i+1..i+1] == text[0..i+1]
+        // Which simplifies to: Join(segments + [part]) + "\n" == text[0..i] + "\n"
+        // And we know text[0..i+1] IS text[0..i] + "\n"
+        
         segments := segments + [part];
-        start := i + 1;
-      } else if ch == '\r' {
-        assert 0 <= start && start <= i && i <= |text|;
-        var part := text[start .. i];
-        assert |part| <= |text|;
-        segments := segments + [part];
-        if i + 1 < |text| && text[i + 1] == '\n' {
-          i := i + 1;
-        }
         start := i + 1;
       }
-
       i := i + 1;
     }
 
-    if start <= |text| {
-      assert 0 <= start && start <= |text|;
-      segments := segments + [text[start .. |text|]];
-    }
-
+    var lastPart := text[start .. |text|];
+    // Final step logic
+    JoinDistributes(segments, "\n", lastPart);
+    
+    // We knew: (if |segments|==0 then "" else Join(segments)+"\n") + lastPart == text[0..|text|]
+    // If |segments| > 0: Join(segments)+"\n" + lastPart == Join(segments + [lastPart])
+    // If |segments| == 0: "" + lastPart == Join([lastPart])
+    
+    segments := segments + [lastPart];
     lines := segments;
   }
+
 
   // We need to implement string splitting manually or use libraries.
   // This custom splitter handles quoted strings (e.g. comments with spaces).

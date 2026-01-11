@@ -1,0 +1,36 @@
+# Build directories
+bin/
+obj/
+
+# IDE metadata
+.vs/
+.idea/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Build artifacts
+*.dll
+*.exe
+*.pdb
+*.mdb
+*.cache
+*.log
+*.db
+
+# .NET specific
+packages/
+*.nupkg
+project.lock.json
+project.assets.json
+PackageRestoreConsent.xml
+*.deps.json
+*.runtimeconfig.json
+
+# OS files
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+*$~

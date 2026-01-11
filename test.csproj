@@ -12,7 +12,7 @@
 
   
   <ItemGroup>
-      <Compile Include="/Users/soumik/code/dafny_iptables_to_smtlib2/src/IptablesToSmt.cs" />
+      <Compile Include="/Users/soumik/code/dafny_iptables_to_smtlib2/test.cs" />
 
       <PackageReference Include="System.Runtime.Numerics" Version="4.3.0" />
       <PackageReference Include="System.Collections.Immutable" Version="1.7.1" />
