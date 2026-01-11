@@ -1,0 +1,15 @@
+*filter
+# Default chains
+:INPUT DROP [0:0]
+:FORWARD DROP [0:0]
+:OUTPUT ACCEPT [0:0]
+
+# Allow SSH from management network
+-A INPUT -s 10.0.0.0/8 -p tcp -j ACCEPT
+# Block Telnet
+-A INPUT -p tcp --dport 23 -j DROP
+# Allow DNS responses
+-A OUTPUT -d 203.0.113.53/32 -p udp -j ACCEPT
+# Reject anything else headed to a sensitive host
+-A OUTPUT -d 198.51.100.42/32 -j REJECT
+COMMIT
