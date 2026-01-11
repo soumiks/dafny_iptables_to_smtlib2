@@ -1,0 +1,17 @@
+# Enable IP forwarding in the kernel (essential for routing)
+# echo 1 > /proc/sys/net/ipv4/ip_forward
+
+# Configure the FORWARD chain to allow traffic between internal and external networks
+-A FORWARD -i eth1 -o eth0 -j ACCEPT
+-A FORWARD -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+
+# Enable Source NAT (SNAT) using MASQUERADE in the nat table
+# MASQUERADE dynamically uses the IP of the outgoing interface (eth0)
+-t nat -A POSTROUTING -o eth0 -j MASQUERADE
+
+# Standard firewall rules for the gateway itself (similar to example 1)
+-P INPUT DROP
+-A INPUT -i lo -j ACCEPT
+-A INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+# ... (add specific INPUT rules for the gateway's services if needed, like SSH)
+

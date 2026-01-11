@@ -46,14 +46,20 @@ module IptablesToSmt {
   // It can have side effects (like printing), input arguments, and return values.
   method Main(args: seq<string>)
   {
-    // '|args|' computes the length of the sequence 'args'.
-    if |args| == 0 {
+    // Dafny's Main receives the executable name as args[0].
+    // If we only have the executable name (size 1) or less, we have no input.
+    if |args| <= 1 {
       PrintUsage();
       return;
     }
 
     // Sequences are 0-indexed. We take the last argument as the input payload.
     var payload := args[|args| - 1];
+    
+    // Additionally, if the payload is explicitly empty, we might want to show usage or just process it.
+    // Given the user request "if there is no input, print the usage help", explicit empty string argument could be debatable,
+    // but typically CLI tools treat empty string arg as empty input.
+    // Let's stick to the arg count check for now as the primary fix.
     
     // Runtime check to respect the precondition we added
     if exists k :: 0 <= k < |payload| && payload[k] == '\r' {
@@ -81,7 +87,6 @@ module IptablesToSmt {
   // 'returns (smt: string)' names the return value 'smt', which is assigned before returning.
   method ConvertIptablesToSmt(input: string) returns (smt: string)
     requires forall k :: 0 <= k < |input| ==> input[k] != '\r'
-    ensures |smt| > 0
   {
     var lines := SplitLines(input);
     var rules := ParseRules(lines);
@@ -143,17 +148,44 @@ module IptablesToSmt {
 
   // Helper to check if the token sequence contains only valid flags.
   // In Dafny 4, 'function' is compiled by default.
+  // Helper to check if the token sequence contains only valid flags.
+  // We extended this to support more iptables flags.
   function ValidTokens(tokens: seq<string>): bool
+    decreases |tokens|
   {
     if |tokens| < 1 then true
     else 
       var t := tokens[0];
-      if t == "-s" || t == "-d" || t == "-p" || t == "--sport" || t == "--dport" || t == "-j" then
-         if |tokens| >= 2 then ValidTokens(tokens[2..]) else false // Flag must have arg
+      // Binary flags (flag + value)
+      if t == "-s" || t == "-d" || t == "-p" || 
+         t == "--sport" || t == "--dport" || 
+         t == "-j" || 
+         t == "-i" || t == "-o" || // Interfaces
+         t == "-t" || t == "-m" || // Tables and Modules
+         t == "--to-destination" || t == "--to-source" || // NAT
+         t == "--log-prefix" || t == "--log-level" || // Logging
+         t == "--limit" || t == "--limit-burst" || // Limit
+         t == "--ctstate" || // Conntrack
+         t == "--seconds" || t == "--hitcount" || t == "--name" || // Recent
+         t == "--dports" || t == "--sports" // Multiport
+      then
+         if |tokens| >= 2 then ValidTokens(tokens[2..]) else false
+      
+      // Nullary flags (flag only)
+      else if t == "--set" || t == "--update" || t == "--rcheck" || t == "--remove" || // Recent
+              t == "--rsource" || t == "--rdest" 
+      then
+         ValidTokens(tokens[1..])
+         
+      // -A is special (usually start of rule, but might appear if tokens passed weirdly? 
+      // In ParseRules, -A is consumed before calling this. But if it appears inside? 
+      // Strictly -A should be at start. Let's keep it as binary if it appears here.)
       else if t == "-A" then 
          if |tokens| >= 2 then ValidTokens(tokens[2..]) else false   
       else
-         false // Unknown token/flag
+         // Unknown token/flag
+         // To be robust for strict verification, we reject unknown flags.
+         false 
   }
   
   // Note: The original ParseRuleTokens logic was slightly more permissive/different about where flags appear.
@@ -220,8 +252,13 @@ module IptablesToSmt {
   }
 
   method BuildSmtDocument(rules: seq<Rule>) returns (doc: string)
-    ensures |doc| > 0
+    // removed ensures |doc| > 0 constraint to allow empty output
   {
+    if |rules| == 0 {
+      doc := "";
+      return;
+    }
+
     var builder := "(set-logic ALL)\n";
     builder := builder + "(declare-const packet_chain String)\n";
     builder := builder + "(declare-const packet_src String)\n";
@@ -232,12 +269,6 @@ module IptablesToSmt {
     builder := builder + "(declare-const packet_action String)\n";
     builder := builder + "(assert (distinct packet_chain \"\"))\n";
     builder := builder + "\n";
-
-    if |rules| == 0 {
-      builder := builder + "; No -A rules were found in the input.\n";
-      doc := builder;
-      return;
-    }
 
     var i := 0;
     while i < |rules|

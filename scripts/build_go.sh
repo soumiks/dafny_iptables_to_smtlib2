@@ -19,15 +19,19 @@ fi
 if ! command -v goimports &> /dev/null; then
     echo "Warning: goimports not found. Installing..."
     go install golang.org/x/tools/cmd/goimports@latest
-    # Add GOPATH/bin to PATH for this script execution if needed, though usually handled by user env
-    export PATH=$PATH:$(go env GOPATH)/bin
 fi
+
+# Add GOPATH/bin to PATH so Dafny can find goimports
+export PATH=$PATH:$(go env GOPATH)/bin
 
 echo "Building Dafny project to Go..."
 
+# Clean up previous build artifacts
+rm -rf dafny-iptables-go
+
 # 1. Transpile Dafny to Go
-# This creates a 'dafny-iptables-go' directory with the Go source
-dafny build --target:go src/IptablesToSmt.dfy --output:dafny-iptables-go
+# --output:dafny-iptables will create 'dafny-iptables-go' directory
+dafny build --target:go src/IptablesToSmt.dfy --output:dafny-iptables
 
 # 2. Build the final Go binary
 echo "Compiling Go binary..."

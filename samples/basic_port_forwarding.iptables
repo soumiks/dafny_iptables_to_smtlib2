@@ -1,0 +1,9 @@
+# Assuming the NAT Gateway setup is already in place
+
+# Add a Destination NAT (DNAT) rule to the PREROUTING chain
+# This redirects incoming traffic on eth0, port 80, to the internal server
+-t nat -A PREROUTING -i eth0 -p tcp --dport 80 --jump DNAT --to-destination 192.168.1.100:80
+
+# Ensure the FORWARD chain allows this specific forwarded traffic
+-A FORWARD -p tcp -d 192.168.1.100 --dport 80 -m conntrack --ctstate NEW,ESTABLISHED,RELATED -j ACCEPT
+

@@ -1,0 +1,27 @@
+# Set default chain policies to DROP all incoming and forwarded traffic
+-P INPUT DROP
+-P FORWARD DROP
+-P OUTPUT ACCEPT # Typically allow all outbound traffic from the server itself
+
+# Allow loopback traffic (essential for local processes)
+-A INPUT -i lo -j ACCEPT
+-A OUTPUT -o lo -j ACCEPT
+
+# Allow established and related incoming connections (stateful firewall)
+# This means replies to your server's outbound requests are allowed back in
+-A INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+
+# Explicitly allow specific incoming services
+
+# Allow SSH (port 22) from a specific IP range (e.g., your office network)
+# Change 203.0.113.0/24 to your actual IP range
+-A INPUT -s 203.0.113.0/24 -p tcp --dport 22 -m conntrack --ctstate NEW,ESTABLISHED -j ACCEPT
+
+# Allow general web traffic (HTTP/HTTPS) from anywhere
+-A INPUT -p tcp -m multiport --dports 80,443 -m conntrack --ctstate NEW,ESTABLISHED -j ACCEPT
+
+# Optional: Log dropped packets (rate-limited to prevent log floods) before final DROP
+-A INPUT -m limit --limit 5/min -j LOG --log-prefix "IPTABLES INPUT DROP: " --log-level 7
+
+# Save rules (method depends on your Linux distribution, e.g., `netfilter-persistent save` or `iptables-save > /etc/sysconfig/iptables`)
+
