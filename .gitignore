@@ -34,3 +34,7 @@ Thumbs.db
 ehthumbs.db
 Desktop.ini
 *$~
+
+# Go build artifacts
+dafny-iptables-go/
+dafny-iptables
