@@ -1,4 +1,4 @@
-// Dafny program IptablesToSmt.dfy compiled into C#
+// Dafny program Tests.dfy compiled into C#
 // To recompile, you will need the libraries
 //     System.Runtime.Numerics.dll System.Collections.Immutable.dll
 // but the 'dotnet' tool in .NET should pick those up automatically.
@@ -9,23 +9,55 @@ using System;
 using System.Numerics;
 using System.Collections;
 [assembly: DafnyAssembly.DafnySourceAttribute(@"// dafny 4.11.0.0
-// Command-line arguments: run src/IptablesToSmt.dfy -- *filter
-# Default chains
-:INPUT DROP [0:0]
-:FORWARD DROP [0:0]
-:OUTPUT ACCEPT [0:0]
+// Command-line arguments: run src/Tests.dfy
+// Tests.dfy
 
-# Allow SSH from management network
--A INPUT -s 10.0.0.0/8 -p tcp -j ACCEPT
-# Block Telnet
--A INPUT -p tcp --dport 23 -j DROP
-# Allow DNS responses
--A OUTPUT -d 203.0.113.53/32 -p udp -j ACCEPT
-# Reject anything else headed to a sensitive host
--A OUTPUT -d 198.51.100.42/32 -j REJECT
-COMMIT
-// IptablesToSmt.dfy
 
+module Tests {
+  method TestParseTarget()
+  {
+    var t1 := ParseTarget(""DROP"");
+    assert t1 == TargetDrop;
+    var t2 := ParseTarget(""ACCEPT"");
+    assert t2 == TargetAccept;
+    var t3 := ParseTarget(""MyChain"");
+    assert t3 == TargetJump(""MyChain"");
+  }
+
+  method TestParseRule_Pass()
+  {
+    var tokens := [""-A"", ""INPUT"", ""-s"", ""1.2.3.4"", ""-j"", ""ACCEPT""];
+    var idx := 1;
+    var raw := ""-A INPUT -s 1.2.3.4 -j ACCEPT"";
+    var r, ok := ParseRuleTokens(tokens, idx, raw);
+    var t2 := tokens[2..];
+    assert t2[0] == ""-s"";
+    assert t2[1..][0] == ""1.2.3.4"";
+    assert t2[2..][0] == ""-j"";
+  }
+
+  method TestFormatRule()
+  {
+    var r := Rule(""INPUT"", MatchExact(""1.2.3.4""), MatchAny, MatchAny, MatchAny, MatchAny, TargetAccept, 10, ""-A INPUT -s 1.2.3.4 -j ACCEPT"");
+    var output := FormatRule(r, 1);
+    assert |output| > 0;
+  }
+
+  function StringContains(haystack: string, needle: string): bool
+    decreases haystack, needle
+  {
+    if |needle| > |haystack| then
+      false
+    else if |needle| == 0 then
+      true
+    else if haystack[0 .. |needle|] == needle then
+      true
+    else
+      StringContains(haystack[1..], needle)
+  }
+
+  import opened IptablesToSmt
+}
 
 module IptablesToSmt {
   method Main(args: seq<string>)
@@ -6813,7 +6845,7 @@ namespace IptablesToSmt {
           _1_i = (_1_i) + (BigInteger.One);
         }
         if ((_1_i) >= (new BigInteger((text).Count))) {
-          goto after_0;
+          goto after_1;
         }
         if (((text).Select(_1_i)) == (new Dafny.Rune('"'))) {
           BigInteger _2_start;
@@ -6846,9 +6878,9 @@ namespace IptablesToSmt {
             _0_parts = Dafny.Sequence<Dafny.ISequence<Dafny.Rune>>.Concat(_0_parts, Dafny.Sequence<Dafny.ISequence<Dafny.Rune>>.FromElements(_5_token));
           }
         }
-      continue_0: ;
+      continue_1: ;
       }
-    after_0: ;
+    after_1: ;
       tokens = _0_parts;
       return tokens;
     }
@@ -7260,6 +7292,68 @@ namespace IptablesToSmt {
     }
   }
 } // end of namespace IptablesToSmt
+namespace Tests {
+
+  public partial class __default {
+    public static void TestParseTarget()
+    {
+      IptablesToSmt._ITarget _0_t1;
+      IptablesToSmt._ITarget _out0;
+      _out0 = IptablesToSmt.__default.ParseTarget(Dafny.Sequence<Dafny.Rune>.UnicodeFromString("DROP"));
+      _0_t1 = _out0;
+      IptablesToSmt._ITarget _1_t2;
+      IptablesToSmt._ITarget _out1;
+      _out1 = IptablesToSmt.__default.ParseTarget(Dafny.Sequence<Dafny.Rune>.UnicodeFromString("ACCEPT"));
+      _1_t2 = _out1;
+      IptablesToSmt._ITarget _2_t3;
+      IptablesToSmt._ITarget _out2;
+      _out2 = IptablesToSmt.__default.ParseTarget(Dafny.Sequence<Dafny.Rune>.UnicodeFromString("MyChain"));
+      _2_t3 = _out2;
+    }
+    public static void TestParseRule__Pass()
+    {
+      Dafny.ISequence<Dafny.ISequence<Dafny.Rune>> _0_tokens;
+      _0_tokens = Dafny.Sequence<Dafny.ISequence<Dafny.Rune>>.FromElements(Dafny.Sequence<Dafny.Rune>.UnicodeFromString("-A"), Dafny.Sequence<Dafny.Rune>.UnicodeFromString("INPUT"), Dafny.Sequence<Dafny.Rune>.UnicodeFromString("-s"), Dafny.Sequence<Dafny.Rune>.UnicodeFromString("1.2.3.4"), Dafny.Sequence<Dafny.Rune>.UnicodeFromString("-j"), Dafny.Sequence<Dafny.Rune>.UnicodeFromString("ACCEPT"));
+      BigInteger _1_idx;
+      _1_idx = BigInteger.One;
+      Dafny.ISequence<Dafny.Rune> _2_raw;
+      _2_raw = Dafny.Sequence<Dafny.Rune>.UnicodeFromString("-A INPUT -s 1.2.3.4 -j ACCEPT");
+      IptablesToSmt._IRule _3_r;
+      bool _4_ok;
+      IptablesToSmt._IRule _out0;
+      bool _out1;
+      IptablesToSmt.__default.ParseRuleTokens(_0_tokens, _1_idx, _2_raw, out _out0, out _out1);
+      _3_r = _out0;
+      _4_ok = _out1;
+      Dafny.ISequence<Dafny.ISequence<Dafny.Rune>> _5_t2;
+      _5_t2 = (_0_tokens).Drop(new BigInteger(2));
+    }
+    public static void TestFormatRule()
+    {
+      IptablesToSmt._IRule _0_r;
+      _0_r = IptablesToSmt.Rule.create(Dafny.Sequence<Dafny.Rune>.UnicodeFromString("INPUT"), IptablesToSmt.FieldMatch.create_MatchExact(Dafny.Sequence<Dafny.Rune>.UnicodeFromString("1.2.3.4")), IptablesToSmt.FieldMatch.create_MatchAny(), IptablesToSmt.FieldMatch.create_MatchAny(), IptablesToSmt.FieldMatch.create_MatchAny(), IptablesToSmt.FieldMatch.create_MatchAny(), IptablesToSmt.Target.create_TargetAccept(), new BigInteger(10), Dafny.Sequence<Dafny.Rune>.UnicodeFromString("-A INPUT -s 1.2.3.4 -j ACCEPT"));
+      Dafny.ISequence<Dafny.Rune> _1_output;
+      _1_output = IptablesToSmt.__default.FormatRule(_0_r, BigInteger.One);
+    }
+    public static bool StringContains(Dafny.ISequence<Dafny.Rune> haystack, Dafny.ISequence<Dafny.Rune> needle)
+    {
+    TAIL_CALL_START: ;
+      if ((new BigInteger((needle).Count)) > (new BigInteger((haystack).Count))) {
+        return false;
+      } else if ((new BigInteger((needle).Count)).Sign == 0) {
+        return true;
+      } else if (((haystack).Subsequence(BigInteger.Zero, new BigInteger((needle).Count))).Equals(needle)) {
+        return true;
+      } else {
+        Dafny.ISequence<Dafny.Rune> _in0 = (haystack).Drop(BigInteger.One);
+        Dafny.ISequence<Dafny.Rune> _in1 = needle;
+        haystack = _in0;
+        needle = _in1;
+        goto TAIL_CALL_START;
+      }
+    }
+  }
+} // end of namespace Tests
 namespace _module {
 
 } // end of namespace _module

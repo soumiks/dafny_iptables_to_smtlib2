@@ -254,7 +254,94 @@ module IptablesToSmt {
     doc := builder;
   }
 
-  method FormatRule(rule: Rule, index: int) returns (formatted: string)
+  function IntToString(n: int): string
+    decreases if n < 0 then -n else n
+  {
+    if n == 0 then "0"
+    else 
+      var value := if n < 0 then -n else n;
+      var digits := DigitsToString(value);
+      if n < 0 then "-" + digits else digits
+  }
+
+  function DigitsToString(n: int): string
+    requires n > 0
+    decreases n
+  {
+    var digit := n % 10;
+    var rest := n / 10;
+    var dStr := DigitToString(digit);
+    if rest == 0 then dStr else DigitsToString(rest) + dStr 
+  }
+
+  function DigitToString(d: int): string
+    requires 0 <= d < 10
+  {
+    "0123456789"[d .. d+1]
+  }
+
+  function BuildRuleConditions(rule: Rule): seq<string>
+  {
+         var chainLiteral := FormatStringLiteral(rule.chain);
+    var c1 := ["(= pkt_chain " + chainLiteral + ")"];
+    var c2 := MaybeAppend(c1, "pkt_src", rule.source);
+    var c3 := MaybeAppend(c2, "pkt_dst", rule.destination);
+    var c4 := MaybeAppend(c3, "pkt_proto", rule.protocol);
+    var c5 := MaybeAppend(c4, "pkt_sport", rule.srcPort);
+    var c6 := MaybeAppend(c5, "pkt_dport", rule.dstPort);
+    c6
+  }
+
+  function MaybeAppend(conds: seq<string>, fieldName: string, crit: FieldMatch): seq<string>
+  {
+    match crit
+      case MatchExact(value) =>
+        var literal := FormatStringLiteral(value);
+        var fragment := "(= " + fieldName + " " + literal + ")";
+        conds + [fragment]
+      case MatchAny =>
+        conds
+  }
+
+  function FormatTargetLiteral(target: Target): string
+  {
+    FormatStringLiteral(TargetToString(target))
+  }
+
+  function TargetToString(target: Target): string
+  {
+    match target
+      case TargetAccept => "ACCEPT"
+      case TargetDrop => "DROP"
+      case TargetReject => "REJECT"
+      case TargetReturn => "RETURN"
+      case TargetJump(name) => name
+  }
+
+  function FormatStringLiteral(text: string): string
+  {
+    "\"" + EscapeForSmt(text) + "\""
+  }
+
+  function EscapeForSmt(text: string): string
+  {
+     // Recursive definition needed for function
+     EscapeForSmtRecursive(text)
+  }
+
+  function EscapeForSmtRecursive(text: string): string
+    decreases |text|
+  {
+    if |text| == 0 then ""
+    else
+      var ch := text[0];
+      var rest := EscapeForSmtRecursive(text[1..]);
+      if ch == '"' || ch == '\\' then "\\" + text[0..1] + rest
+      else text[0..1] + rest
+  }
+
+  // Pure function version of FormatRule
+  function FormatRule(rule: Rule, index: int): string
     requires index >= 0
   {
     var indexText := IntToString(index);
@@ -263,137 +350,24 @@ module IptablesToSmt {
     var def := "(define-fun rule" + indexText + " ((pkt_chain String) (pkt_src String) (pkt_dst String) (pkt_proto String) (pkt_sport String) (pkt_dport String)) Bool\n";
     var conditions := BuildRuleConditions(rule);
 
-    var condBuilder := "";
-    if |conditions| == 0 {
-      condBuilder := "  true\n";
-    } else {
-      condBuilder := "  (and\n";
-      var i := 0;
-      while i < |conditions|
-        decreases |conditions| - i
-      {
-        condBuilder := condBuilder + "    " + conditions[i] + "\n";
-        i := i + 1;
-      }
-
-      condBuilder := condBuilder + "  )\n";
-    }
+    var condBuilder := 
+      if |conditions| == 0 then "  true\n"
+      else "  (and\n" + JoinLinesIndent(conditions) + "  )\n";
 
     var closing := ")\n";
     var targetLiteral := FormatTargetLiteral(rule.target);
     var action := "(assert (=> (rule" + indexText + " packet_chain packet_src packet_dst packet_proto packet_sport packet_dport)\n" +
       "            (= packet_action " + targetLiteral + ")))\n";
 
-    formatted := header + def + condBuilder + closing + action;
+    header + def + condBuilder + closing + action
   }
 
-  method IntToString(n: int) returns (text: string)
+  function JoinLinesIndent(lines: seq<string>): string
   {
-    if n == 0 {
-      text := "0";
-      return;
-    }
-
-    var prefix := "";
-    var value := n;
-    if n < 0 {
-      prefix := "-";
-      value := -n;
-    }
-
-    var digits := "";
-    while value > 0
-      decreases value
-    {
-      var digit := value % 10;
-      var digitString := DigitToString(digit);
-      digits := digitString + digits;
-      value := value / 10;
-    }
-
-    text := prefix + digits;
+    if |lines| == 0 then ""
+    else "    " + lines[0] + "\n" + JoinLinesIndent(lines[1..])
   }
 
-  // Requires clause specifies a precondition: d must be a single digit.
-  // The caller must prove this is true before calling DigitToString.
-  method DigitToString(d: int) returns (text: string)
-    requires 0 <= d < 10
-  {
-    var digitsLiteral := "0123456789";
-    assert |digitsLiteral| == 10;
-    text := digitsLiteral[d .. d + 1];
-  }
-
-  method BuildRuleConditions(rule: Rule) returns (conditions: seq<string>)
-  {
-    var conds: seq<string> := [];
-    var chainLiteral := FormatStringLiteral(rule.chain);
-    conds := conds + ["(= pkt_chain " + chainLiteral + ")"];
-    conds := MaybeAppend(conds, "pkt_src", rule.source);
-    conds := MaybeAppend(conds, "pkt_dst", rule.destination);
-    conds := MaybeAppend(conds, "pkt_proto", rule.protocol);
-    conds := MaybeAppend(conds, "pkt_sport", rule.srcPort);
-    conds := MaybeAppend(conds, "pkt_dport", rule.dstPort);
-    conditions := conds;
-  }
-
-  method MaybeAppend(conds: seq<string>, fieldName: string, crit: FieldMatch) returns (updated: seq<string>)
-  {
-    match crit
-      case MatchExact(value) =>
-        var literal := FormatStringLiteral(value);
-        var fragment := "(= " + fieldName + " " + literal + ")";
-        updated := conds + [fragment];
-      case MatchAny =>
-        updated := conds;
-  }
-
-  method FormatTargetLiteral(target: Target) returns (literal: string)
-  {
-    var targetText := TargetToString(target);
-    literal := FormatStringLiteral(targetText);
-  }
-
-  method TargetToString(target: Target) returns (value: string)
-  {
-    match target
-      case TargetAccept => value := "ACCEPT";
-      case TargetDrop => value := "DROP";
-      case TargetReject => value := "REJECT";
-      case TargetReturn => value := "RETURN";
-      case TargetJump(name) => value := name;
-  }
-
-  method FormatStringLiteral(text: string) returns (encoded: string)
-  {
-    var escaped := EscapeForSmt(text);
-    encoded := "\"" + escaped + "\"";
-  }
-
-  method EscapeForSmt(text: string) returns (encoded: string)
-    ensures |encoded| <= 2 * |text|
-  {
-    var builder := "";
-    var i := 0;
-    while i < |text|
-      decreases |text| - i
-      invariant 0 <= i <= |text|
-      invariant |builder| <= 2 * i
-    {
-      var ch := text[i];
-      if ch == '"' || ch == '\\' {
-        assert i + 1 <= |text|;
-        builder := builder + "\\" + text[i .. i + 1];
-      } else {
-        assert i + 1 <= |text|;
-        builder := builder + text[i .. i + 1];
-      }
-
-      i := i + 1;
-    }
-
-    encoded := builder;
-  }
   function ToUp(ch: char): char
   {
     if 'a' <= ch <= 'z' then (ch as int - 'a' as int + 'A' as int) as char else ch
