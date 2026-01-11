@@ -20,6 +20,20 @@ A formally verified Dafny program that parses a subset of the `iptables-save` fo
 
    The tool reads the entire input as a single string argument.
 
+## Building with Go
+
+To build a standalone executable using the Go backend:
+
+```bash
+./scripts/build_go.sh
+```
+
+This will produce a `dafny-iptables` binary in the project root. You can run it like this:
+
+```bash
+./dafny-iptables -- "$(cat samples/iptables-sample.rules)" > rules.smt2
+```
+
 ## Verification
 
 To verified the correctness of the parser and printer:
