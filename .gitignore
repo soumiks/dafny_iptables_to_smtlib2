@@ -38,6 +38,7 @@ Desktop.ini
 # Go build artifacts
 dafny-iptables-go/
 dafny-iptables
+iptables-verifier
 
 # Generated C# files (from dafny run)
 *.cs
